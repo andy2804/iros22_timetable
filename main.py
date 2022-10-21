@@ -68,8 +68,20 @@ def main():
     # SIDEBAR
     #########
     st.sidebar.title("Filters")
-    st.sidebar.subheader("Abstract")
-    show_abstract = st.sidebar.checkbox("Show abstract", value=False)
+
+    # Filter Keywords Input
+    st.sidebar.subheader("Keywords")
+    keywords = st.sidebar.text_input("Filter Keywords", help="Seperate multiple keywords by a space.")  # noqa
+    # keywords = keywords.replace(" ", "")
+    keywords = [k for k in keywords.split(" ") if k != ""]
+    # keywords = st.sidebar.multiselect("Keywords", options=keywords, default=keywords)
+    for k in keywords:
+        df_papers = df_papers[
+            df_papers["title"].str.lower().str.contains(k) |
+            df_papers["keywords"].str.lower().str.contains(k)
+        ]
+        # df_papers["title"] = df_papers["title"].map(lambda t: t.replace(k, f"<b>{k}</b>"))
+
     st.sidebar.subheader("Days")
     DAYS_FILTER["Monday"] = st.sidebar.checkbox("Monday, 24th Oct", DAYS_FILTER["Monday"])
     DAYS_FILTER["Tuesday"] = st.sidebar.checkbox("Tuesday, 25th Oct", DAYS_FILTER["Tuesday"])
@@ -79,20 +91,13 @@ def main():
         days_mask = days_mask | (DAYS_FILTER[d] & (df_papers["start"].dt.date == DAYS[d]))
     df_papers = df_papers[days_mask]
 
-    # Filter Keywords Input
-    st.sidebar.subheader("Keywords")
-    keywords = st.sidebar.text_input("Filter Keywords", help="Seperate multiple keywords by a space.")  # noqa
-    # keywords = keywords.replace(" ", "")
-    keywords = [k for k in keywords.split(" ") if k != ""]
-    keywords = st.sidebar.multiselect("Keywords", options=keywords, default=keywords)
-    for k in keywords:
-        df_papers = df_papers[
-            df_papers["title"].str.lower().str.contains(k) |
-            df_papers["keywords"].str.lower().str.contains(k)
-        ]
-        # df_papers["title"] = df_papers["title"].map(lambda t: t.replace(k, f"<b>{k}</b>"))
-        df_papers["abstract"] = df_papers["abstract"].map(lambda t: t.replace("\n", " "))
-        df_papers["keywords"] = df_papers["keywords"].map(lambda t: t.replace("\n", " "))
+    st.sidebar.subheader("Abstract")
+    show_abstract = st.sidebar.checkbox("Show abstract", value=False)
+
+    # Filter newline
+    df_papers["title"] = df_papers["title"].map(lambda t: t.replace("\n", " "))
+    df_papers["abstract"] = df_papers["abstract"].map(lambda t: str(t).replace("\n", " "))
+    df_papers["keywords"] = df_papers["keywords"].map(lambda t: t.replace("\n", " "))
 
     # MAIN BODY
     ###########
@@ -115,7 +120,7 @@ def main():
                     df_day["keywords"] = df_day["keywords"].map(
                         lambda t: re.sub(f"({re.escape(k)})", r"<b>\1</b>", string=t, flags=re.IGNORECASE)
                     )
-                    df_day["title"] = "<a href='" + df_day["link"] + "'>" + df_day["title"] + "</a>"
+                df_day["title"] = "<a href='" + df_day["link"] + "'>" + df_day["title"] + "</a>"
                 if not show_abstract and "abstract" in COLUMNS:
                     COLUMNS.remove("abstract")
                 # st.table(df_day[COLUMNS])
