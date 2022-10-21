@@ -69,7 +69,7 @@ def main():
     tags = defaultdict(int)
     for kws in df_papers["keywords"].to_list():
         for kw in kws.split(", "):
-            tags[kw.lower()] += 1
+            tags[kw.lower().strip()] += 1
     tags = sorted([(v, k) for k, v in tags.items()], key=lambda v: -v[0])
 
     # Create links
