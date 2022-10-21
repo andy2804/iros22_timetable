@@ -4,6 +4,8 @@ import datetime
 import pandas as pd
 import streamlit as st
 
+from collections import defaultdict
+
 
 F_PAPERS = "papers.json"
 F_ROOMS = "rooms.json"
@@ -13,9 +15,9 @@ DAYS = {
     "Wednesday": datetime.date(2022, 10, 26),
 }
 DAYS_FILTER = {
-    "Monday": False,
-    "Tuesday": False,
-    "Wednesday": False,
+    "Monday": True,
+    "Tuesday": True,
+    "Wednesday": True,
 }
 COLUMNS = [
     "room",
@@ -25,12 +27,12 @@ COLUMNS = [
 ]
 
 
-@st.experimental_memo
+# @st.experimental_memo
 def load_data():
     return json.load(open(F_PAPERS)), json.load(open(F_ROOMS))
 
 
-@st.experimental_memo
+# @st.experimental_memo
 def parse_datetimes(date: pd.Series, time: pd.Series):
     # date: pd.Series = pd.to_datetime(date)
     time = time.str.split("-", n=2, expand=True)
@@ -56,32 +58,26 @@ def main():
 
     # Reformat rooms
     df_papers["room"] = df_papers["id"].str.split(" ", expand=True).iloc[:, 1].str.split(".", expand=True).iloc[:, 0].map(rooms)  # noqa
+    df_papers["room"] = df_papers["room"].map(lambda t: re.search(r"\((.*)\)", str(t))[1])
+    df_papers["room"] = "<div style='white-space: nowrap'>" + df_papers["room"] + "</div>"
 
     # Split abstract / keywords
     df_abstract = df_papers["abstract"].str.split("Abstract: ", expand=True)
     df_papers["keywords"] = df_abstract.iloc[:, 0].str.split("Keywords: ", expand=True).iloc[:, 1]
     df_papers["abstract"] = df_abstract.iloc[:, 1]
 
+    tags = defaultdict(int)
+    for kws in df_papers["keywords"].to_list():
+        for kw in kws.split(", "):
+            tags[kw.lower()] += 1
+    tags = sorted([(v, k) for k, v in tags.items()], key=lambda v: -v[0])
+
     # Create links
     df_papers["link"] = df_papers["title"].map(lambda t: f"https://scholar.google.com/scholar?q={t}")
 
     # SIDEBAR
     #########
-    st.sidebar.title("Filters")
-
-    # Filter Keywords Input
-    st.sidebar.subheader("Keywords")
-    keywords = st.sidebar.text_input("Filter Keywords", help="Seperate multiple keywords by a space.")  # noqa
-    # keywords = keywords.replace(" ", "")
-    keywords = [k for k in keywords.split(" ") if k != ""]
-    # keywords = st.sidebar.multiselect("Keywords", options=keywords, default=keywords)
-    for k in keywords:
-        df_papers = df_papers[
-            df_papers["title"].str.lower().str.contains(k) |
-            df_papers["keywords"].str.lower().str.contains(k)
-        ]
-        # df_papers["title"] = df_papers["title"].map(lambda t: t.replace(k, f"<b>{k}</b>"))
-
+    st.sidebar.title("Options")
     st.sidebar.subheader("Days")
     DAYS_FILTER["Monday"] = st.sidebar.checkbox("Monday, 24th Oct", DAYS_FILTER["Monday"])
     DAYS_FILTER["Tuesday"] = st.sidebar.checkbox("Tuesday, 25th Oct", DAYS_FILTER["Tuesday"])
@@ -101,8 +97,24 @@ def main():
 
     # MAIN BODY
     ###########
-    st.title("IROS 2022 Paper Timetable")
+    st.title("📆 IROS 2022 Paper Timetable")
+
+    # Filter Keywords Input
+    st.subheader("Filter")
+    keywords = st.text_input("Custom Keywords", help="Seperate multiple keywords by a space.")  # noqa
+    # keywords = keywords.replace(" ", "")
+    keywords = [k for k in keywords.split(" ") if k != ""]
+    selected_tags = (st.multiselect("Popular Tags", options=tags, format_func=lambda v: f"{v[1]} ({v[0]})"))
+    keywords.extend([v[1] for v in selected_tags])
+    for k in keywords:
+        df_papers = df_papers[
+            df_papers["title"].str.lower().str.contains(k) |
+            df_papers["keywords"].str.lower().str.contains(k)
+        ]
+        # df_papers["title"] = df_papers["title"].map(lambda t: t.replace(k, f"<b>{k}</b>"))
+
     st.text(f"Showing {len(df_papers)} out of {n_all} papers")
+
     if len(df_papers):
         for d in DAYS:
             if DAYS_FILTER[d]:
@@ -125,6 +137,7 @@ def main():
                     COLUMNS.remove("abstract")
                 # st.table(df_day[COLUMNS])
                 st.write(df_day[COLUMNS].to_html(escape=False), unsafe_allow_html=True)
+                st.write("")
 
 
 if __name__ == "__main__":
