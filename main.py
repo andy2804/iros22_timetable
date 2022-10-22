@@ -1,9 +1,11 @@
 import re
 import json
 import datetime
+import numpy as np
 import pandas as pd
 import streamlit as st
 
+from textwrap import dedent
 from collections import defaultdict
 
 
@@ -43,6 +45,109 @@ def parse_datetimes(date: pd.Series, time: pd.Series):
     return ts_start, ts_end
 
 
+def table_to_html(dataframe: pd.DataFrame):
+    # Table
+    html = dedent("""
+        <div>
+        <style>
+            .papers {
+                border: none;
+            }
+            .papers td, .papers th {
+                border: none;
+                text-align: left;
+            }
+            .papers tr:hover {
+                background-color: rgba(255, 255, 0, 20%);
+            }
+        </style>
+        <table class='papers' style='border: none; width: 100%; padding: 2px;'>
+    """)
+    
+    # Header
+    html += dedent("""
+        <thead>
+        <tr style='font-weight: bold'>
+    """)
+    for c_idx, col in enumerate(dataframe.columns):
+        if c_idx == 0:
+            html += f"<th style='width: 64px'>{col.capitalize()}</th>"
+        else:
+            html += f"<th>{col.capitalize()}</th>"
+    html += "</tr></thead>"
+
+    # Content
+    html += "<tbody>"
+    for row in dataframe.iterrows():
+        html += "<tr>"
+        for col in row[1]:
+            html += f"<td>{col}</td>"
+        html += "</tr>"
+    html += "</tbody>"
+
+    # Table End
+    html += "</table></div></br>"
+
+    return html
+
+
+def generate_tables(
+    container: st.container,
+    data: pd.DataFrame,
+    date: datetime.date,
+    highlight: list,
+    time: datetime.time = None,
+    range: datetime.timedelta = None,
+    show_abstract: bool = False,
+    show_keywords: bool = False,
+):
+    df = data[data["start"].dt.date == date]
+    if time is not None:
+        df = df[df["start"].dt.time >= time]
+    if range is not None:
+        now = datetime.datetime.combine(date, time)
+        df = df[df["start"].dt.time < (now + range).time()]
+    df.set_index("time", inplace=True)
+    df.sort_index(inplace=True)
+    for k in highlight:
+        df["title"] = df["title"].map(
+            lambda t: re.sub(f"({re.escape(k)})", r"<b>\1</b>", string=t, flags=re.IGNORECASE)
+        )
+        df["abstract"] = df["abstract"].map(
+            lambda t: re.sub(f"({re.escape(k)})", r"<b>\1</b>", string=t, flags=re.IGNORECASE)
+        )
+        df["keywords"] = df["keywords"].map(
+            lambda t: re.sub(f"({re.escape(k)})", r"<b>\1</b>", string=t, flags=re.IGNORECASE)
+        )
+    df["title"] = "<a href='" + df["link"] + "'>" + df["title"] + "</a>"
+    
+    if not show_abstract and "abstract" in COLUMNS:
+        COLUMNS.remove("abstract")
+    if not show_keywords and "keywords" in COLUMNS:
+        COLUMNS.remove("keywords")
+
+
+    if len(df):
+        # t_current = df["start"].values.astype(np.int64)
+        # Round from nsecs to 10 minute blocks
+        t_current = df["start"].values.astype(np.int64) // 1000000000 // 600
+        idx_ch = t_current[1:] - t_current[:-1]
+        idx_ch = np.argwhere(idx_ch).squeeze()
+
+        # st.write(idx_ch)
+        last_ch = 0
+        for ch in list(idx_ch) + [len(df)]:
+            ch = ch
+            df_sec = df.iloc[last_ch:ch]
+            if len(df_sec):
+                # container.write(df_sec[COLUMNS].to_html(escape=False), unsafe_allow_html=True)
+                df_sec_html = table_to_html(df_sec[COLUMNS])
+                container.subheader(df.index[last_ch])
+                container.markdown(df_sec_html, unsafe_allow_html=True)
+            last_ch = ch
+        # container.write(df[COLUMNS].to_html(escape=False), unsafe_allow_html=True)
+
+
 def main():
     keywords = list()
     papers, rooms = load_data()
@@ -59,6 +164,7 @@ def main():
     # Reformat rooms
     df_papers["room"] = df_papers["id"].str.split(" ", expand=True).iloc[:, 1].str.split(".", expand=True).iloc[:, 0].map(rooms)  # noqa
     df_papers["room"] = df_papers["room"].map(lambda t: re.search(r"\((.*)\)", str(t))[1])
+    df_papers["room"] = df_papers["room"].str.replace("Room ", "")
     df_papers["room"] = "<div style='white-space: nowrap'>" + df_papers["room"] + "</div>"
 
     # Split abstract / keywords
@@ -77,7 +183,7 @@ def main():
 
     # SIDEBAR
     #########
-    st.sidebar.title("Options")
+    st.sidebar.title("Show / Hide")
     st.sidebar.subheader("Days")
     DAYS_FILTER["Monday"] = st.sidebar.checkbox("Monday, 24th Oct", DAYS_FILTER["Monday"])
     DAYS_FILTER["Tuesday"] = st.sidebar.checkbox("Tuesday, 25th Oct", DAYS_FILTER["Tuesday"])
@@ -87,8 +193,15 @@ def main():
         days_mask = days_mask | (DAYS_FILTER[d] & (df_papers["start"].dt.date == DAYS[d]))
     df_papers = df_papers[days_mask]
 
-    st.sidebar.subheader("Abstract")
+    st.sidebar.subheader("Columns")
     show_abstract = st.sidebar.checkbox("Show abstract", value=False)
+    show_keywords = st.sidebar.checkbox("Show keywords", value=False)
+
+    st.sidebar.subheader("Tags")
+    cb_keywords = list()
+    for t in tags:
+        if st.sidebar.checkbox(f"{t[1]} ({t[0]})", value=False):
+            cb_keywords.append(t)
 
     # Filter newline
     df_papers["title"] = df_papers["title"].map(lambda t: t.replace("\n", " "))
@@ -100,44 +213,49 @@ def main():
     st.title("📆 IROS 2022 Paper Timetable")
 
     # Filter Keywords Input
-    st.subheader("Filter")
-    keywords = st.text_input("Custom Keywords", help="Seperate multiple keywords by a space.")  # noqa
-    # keywords = keywords.replace(" ", "")
-    keywords = [k for k in keywords.split(" ") if k != ""]
-    selected_tags = (st.multiselect("Popular Tags", options=tags, format_func=lambda v: f"{v[1]} ({v[0]})"))
-    keywords.extend([v[1] for v in selected_tags])
-    for k in keywords:
-        df_papers = df_papers[
-            df_papers["title"].str.lower().str.contains(k) |
-            df_papers["keywords"].str.lower().str.contains(k)
-        ]
-        # df_papers["title"] = df_papers["title"].map(lambda t: t.replace(k, f"<b>{k}</b>"))
+    with st.expander("Filter"):
+    # st.subheader("Filter")
+        keywords = st.text_input("Custom Keywords", help="Seperate multiple keywords by a space.")  # noqa
+        # keywords = keywords.replace(" ", "")
+        keywords = [k for k in keywords.split(" ") if k != ""]
+        selected_tags = (st.multiselect("Popular Tags", options=tags, default=cb_keywords, format_func=lambda v: f"{v[1]} ({v[0]})"))
+        keywords.extend([v[1] for v in selected_tags])
+        keywords.extend([v[1] for v in cb_keywords])
+        for k in keywords:
+            df_papers = df_papers[
+                df_papers["title"].str.lower().str.contains(k) |
+                df_papers["keywords"].str.lower().str.contains(k)
+            ]
+            # df_papers["title"] = df_papers["title"].map(lambda t: t.replace(k, f"<b>{k}</b>"))
 
     st.text(f"Showing {len(df_papers)} out of {n_all} papers")
+    now = datetime.datetime.now()
+    # now = datetime.datetime(2022, 10, 24, 11, 23)
+    now = now - datetime.timedelta(minutes=now.minute % 10)
+    
+    tabs = st.tabs([f"Now"] + list(DAYS.keys()))
+    generate_tables(
+        container=tabs[0],
+        data=df_papers,
+        date=now.date(),
+        time=now.time(),
+        range=datetime.timedelta(hours=1),
+        highlight=keywords,
+        show_abstract=show_abstract,
+        show_keywords=show_keywords
+    )
 
     if len(df_papers):
-        for d in DAYS:
+        for d_idx, d in enumerate(DAYS, start=1):
             if DAYS_FILTER[d]:
-                st.subheader(d)
-                df_day = df_papers[df_papers["start"].dt.date == DAYS[d]]
-                df_day.set_index("time", inplace=True)
-                df_day.sort_index(inplace=True)
-                for k in keywords:
-                    df_day["title"] = df_day["title"].map(
-                        lambda t: re.sub(f"({re.escape(k)})", r"<b>\1</b>", string=t, flags=re.IGNORECASE)
-                    )
-                    df_day["abstract"] = df_day["abstract"].map(
-                        lambda t: re.sub(f"({re.escape(k)})", r"<b>\1</b>", string=t, flags=re.IGNORECASE)
-                    )
-                    df_day["keywords"] = df_day["keywords"].map(
-                        lambda t: re.sub(f"({re.escape(k)})", r"<b>\1</b>", string=t, flags=re.IGNORECASE)
-                    )
-                df_day["title"] = "<a href='" + df_day["link"] + "'>" + df_day["title"] + "</a>"
-                if not show_abstract and "abstract" in COLUMNS:
-                    COLUMNS.remove("abstract")
-                # st.table(df_day[COLUMNS])
-                st.write(df_day[COLUMNS].to_html(escape=False), unsafe_allow_html=True)
-                st.write("")
+                generate_tables(
+                    container=tabs[d_idx],
+                    data=df_papers,
+                    date=DAYS[d],
+                    highlight=keywords,
+                    show_abstract=show_abstract,
+                    show_keywords=show_keywords,
+                )
 
 
 if __name__ == "__main__":
