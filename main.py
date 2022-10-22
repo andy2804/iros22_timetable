@@ -108,6 +108,7 @@ def generate_tables(
         now = datetime.datetime.combine(date, time)
         df = df[df["start"].dt.time < (now + range).time()]
     df.set_index("time", inplace=True)
+    # df.sort_values(by="start", inplace=True)
     df.sort_index(inplace=True)
     for k in highlight:
         df["title"] = df["title"].map(
@@ -128,11 +129,11 @@ def generate_tables(
 
 
     if len(df):
-        # t_current = df["start"].values.astype(np.int64)
+        t_current = df["start"].values.astype(np.int64)
         # Round from nsecs to 10 minute blocks
-        t_current = df["start"].values.astype(np.int64) // 1000000000 // 600
+        # t_current = df["start"].values.astype(np.int64) // 1000000000 // 600
         idx_ch = t_current[1:] - t_current[:-1]
-        idx_ch = np.argwhere(idx_ch).squeeze()
+        idx_ch = np.argwhere(idx_ch).squeeze() + 1
 
         # st.write(idx_ch)
         last_ch = 0
@@ -142,7 +143,8 @@ def generate_tables(
             if len(df_sec):
                 # container.write(df_sec[COLUMNS].to_html(escape=False), unsafe_allow_html=True)
                 df_sec_html = table_to_html(df_sec[COLUMNS])
-                container.subheader(df.index[last_ch])
+                # df_sec_html = table_to_html(df_sec)
+                container.subheader(f"{df['start'].iloc[last_ch].strftime('%a')} {df.index[last_ch]}")
                 container.markdown(df_sec_html, unsafe_allow_html=True)
             last_ch = ch
         # container.write(df[COLUMNS].to_html(escape=False), unsafe_allow_html=True)
@@ -233,9 +235,23 @@ def main():
     # now = datetime.datetime(2022, 10, 24, 11, 23)
     now = now - datetime.timedelta(minutes=now.minute % 10)
     
-    tabs = st.tabs([f"Now"] + list(DAYS.keys()))
+    # tabs = st.tabs([f"Now"] + list(DAYS.keys()))
+    tabs = st.tabs(["All", "Now"])
+
+    if len(df_papers):
+        for d in DAYS:
+            if DAYS_FILTER[d]:
+                generate_tables(
+                    container=tabs[0],
+                    data=df_papers,
+                    date=DAYS[d],
+                    highlight=keywords,
+                    show_abstract=show_abstract,
+                    show_keywords=show_keywords,
+                )
+
     generate_tables(
-        container=tabs[0],
+        container=tabs[1],
         data=df_papers,
         date=now.date(),
         time=now.time(),
@@ -244,18 +260,6 @@ def main():
         show_abstract=show_abstract,
         show_keywords=show_keywords
     )
-
-    if len(df_papers):
-        for d_idx, d in enumerate(DAYS, start=1):
-            if DAYS_FILTER[d]:
-                generate_tables(
-                    container=tabs[d_idx],
-                    data=df_papers,
-                    date=DAYS[d],
-                    highlight=keywords,
-                    show_abstract=show_abstract,
-                    show_keywords=show_keywords,
-                )
 
 
 if __name__ == "__main__":
