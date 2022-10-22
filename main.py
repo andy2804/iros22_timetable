@@ -1,12 +1,13 @@
 import re
 import json
 import datetime
+from textwrap import dedent
+from urllib.parse import quote
+from collections import defaultdict
+
 import numpy as np
 import pandas as pd
 import streamlit as st
-
-from textwrap import dedent
-from collections import defaultdict
 
 
 F_PAPERS = "papers.json"
@@ -25,7 +26,8 @@ COLUMNS = [
     "room",
     "title",
     "abstract",
-    "keywords"
+    "keywords",
+    "📅",
 ]
 
 
@@ -51,6 +53,7 @@ def table_to_html(dataframe: pd.DataFrame):
         <div>
         <style>
             .papers {
+                width: 100%;
                 border: none;
             }
             .papers td, .papers th {
@@ -167,12 +170,26 @@ def main():
     df_papers["room"] = df_papers["id"].str.split(" ", expand=True).iloc[:, 1].str.split(".", expand=True).iloc[:, 0].map(rooms)  # noqa
     df_papers["room"] = df_papers["room"].map(lambda t: re.search(r"\((.*)\)", str(t))[1])
     df_papers["room"] = df_papers["room"].str.replace("Room ", "")
-    df_papers["room"] = "<div style='white-space: nowrap'>" + df_papers["room"] + "</div>"
 
     # Split abstract / keywords
     df_abstract = df_papers["abstract"].str.split("Abstract: ", expand=True)
     df_papers["keywords"] = df_abstract.iloc[:, 0].str.split("Keywords: ", expand=True).iloc[:, 1]
     df_papers["abstract"] = df_abstract.iloc[:, 1]
+
+    # GCal Links
+    # https://www.google.com/calendar/render?action=TEMPLATE&text=PAPER&details=ABSTRACT&location=ROOM&dates=20221024T010000Z%2F20221024T012000Z
+    df_papers["📅"] = (
+        "<a href='https://www.google.com/calendar/render?action=TEMPLATE&text="
+        + df_papers["title"].map(quote)
+        + "&details="
+        + df_papers["keywords"].map(quote)
+        + "&location="
+        + df_papers["room"].map(quote)
+        + "&dates=" + df_papers["start"].dt.strftime("%Y%m%dT%H%M%S")
+        + "%2F" + df_papers["end"].dt.strftime("%Y%m%dT%H%M%S")
+        + "'>➕</a>"
+    )
+    df_papers["room"] = "<div style='white-space: nowrap'>" + df_papers["room"] + "</div>"
 
     tags = defaultdict(int)
     for kws in df_papers["keywords"].to_list():
@@ -212,7 +229,7 @@ def main():
 
     # MAIN BODY
     ###########
-    st.title("📆 IROS 2022 Paper Timetable")
+    st.title("📅 IROS 2022 Paper Timetable")
 
     # Filter Keywords Input
     with st.expander("Filter"):
@@ -236,7 +253,7 @@ def main():
     now = now - datetime.timedelta(minutes=now.minute % 10)
     
     # tabs = st.tabs([f"Now"] + list(DAYS.keys()))
-    tabs = st.tabs(["All", "Now"])
+    tabs = st.tabs(["All", "Live"])
 
     if len(df_papers):
         for d in DAYS:
